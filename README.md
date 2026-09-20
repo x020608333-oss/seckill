@@ -13,9 +13,42 @@ Spring Boot 2.7 / MyBatis-Plus / MySQL 8 / JWT / Lombok / Hutool
 | 版本 | 内容 | 状态 |
 |------|------|------|
 | v1 | 纯数据库秒杀: 乐观锁防超卖 + 唯一索引防重复 + 事务 | ✅ 已完成 |
-| v2 | Redis: 库存预热 + Lua原子扣减 + 商品缓存(穿透/击穿/雪崩防护) | ⬜ 进行中 |
-| v3 | RabbitMQ异步下单削峰 + 延迟队列关单 + Redisson分布式锁限流 | ⬜ 计划中 |
-| v4 | JMeter压测调优 + Docker Compose部署 + 压测报告 | ⬜ 计划中 |
+| v2 | Redis: 库存预热 + Lua原子扣减 + 内存售罄标记 + 商品缓存三连防护 | ✅ 已完成 |
+| v3 | RabbitMQ异步下单削峰 + 手动ACK + 失败补偿 + 结果轮询 | ✅ 已完成 |
+| v4 | Redisson分布式锁限流 + JMeter压测报告 + Docker Compose部署 | ⬜ 计划中 |
+
+## 秒杀核心链路(v3)
+
+```
+用户请求
+   ↓
+[拦截器] JWT鉴权
+   ↓
+[内存] 售罄标记      → 已售罄? 直接失败(0 IO)
+   ↓
+[Redis] 订单Key判重  → 重复秒杀? 直接失败
+   ↓
+[Redis] Lua原子扣减库存 → 库存不足? 打售罄标记+失败
+   ↓
+[Redis] 写订单占位Key("1"=排队中)
+   ↓
+[RabbitMQ] 发消息 → 接口立即返回"排队中"(毫秒级)
+   ↓ ................................. 异步边界
+[MQ消费者] 取消息(prefetch=1, 手动ACK)
+   ↓
+[MySQL] 乐观锁扣库存 + 建单(事务, 唯一索引兜底)
+   ↓
+[Redis] 订单Key回写真实订单ID
+   ↓
+用户轮询 /seckill/result → 拿到订单ID
+```
+
+### 为什么这样设计(面试话术)
+
+- **削峰填谷**: 接口只做内存和Redis操作，1万QPS打进来也不会压垮数据库；MQ按自身消费能力拉取
+- **最终一致**: 建单失败时回滚Redis库存(`compensateRedis`)，保证Redis与DB库存一致
+- **幂等**: DB `(user_id, goods_id)` 唯一索引兜底，消息重复投递也不会重复建单
+- **手动ACK**: 业务成功才ack，系统异常nack重回队列，避免消息丢失
 
 ## 快速开始
 
@@ -54,6 +87,16 @@ export DB_PASSWORD=你的密码
 # Linux/macOS
 ./mvnw spring-boot:run
 ```
+
+### 3.1 依赖中间件(按版本需要)
+
+| 版本 | 需要组件 | Windows 本地安装 |
+|------|----------|------------------|
+| v1 | MySQL | 常规安装即可 |
+| v2 | + Redis | 下载 msi/zip 或 `docker run -d -p 6379:6379 redis` |
+| v3 | + RabbitMQ | 需先装 Erlang, 再装 RabbitMQ 并启动服务 |
+
+> 未安装对应中间件时, 可在 `SeckillApplication` 的 `exclude` 中排除自动装配后先跑 v1。
 
 ### 4. 网页测试控制台
 

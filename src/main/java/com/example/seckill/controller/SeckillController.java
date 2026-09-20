@@ -24,18 +24,19 @@ public class SeckillController {
 
     /**
      * 秒杀下单
-     * v2: Redis预减库存(Lua原子扣减 + 内存售罄标记 + Redis防重复 + DB乐观锁兜底)
+     * v3: Redis预减库存 + MQ异步建单, 立即返回"排队中"
      */
     @PostMapping("/doSeckill")
-    public Result<OrderInfo> doSeckill(@RequestParam Long goodsId) {
+    public Result<String> doSeckill(@RequestParam Long goodsId) {
         User user = UserContext.getUser();
-        OrderInfo order = seckillService.seckill(user, goodsId);
-        return Result.success(order);
+        seckillService.seckill(user, goodsId);
+        // 立即返回, 用户轮询 /result 拿最终结果
+        return Result.success("排队中");
     }
 
     /**
      * 查询秒杀结果
-     * v2: 优先读Redis, miss再查DB
+     * v3: 订单ID(成功) / 0(排队中) / -1(没抢到)
      */
     @GetMapping("/result")
     public Result<Long> getResult(@RequestParam Long goodsId) {

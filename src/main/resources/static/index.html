@@ -132,16 +132,48 @@
         }).then(function (res) { return res.json(); }).then(function (data) {
             log('<- ' + JSON.stringify(data));
             if (data.code === 200) {
-                log('秒杀成功！订单ID=' + data.data.id);
-                loadGoods();
-            } else { log('秒杀失败: ' + data.message); }
-            btn.disabled = false;
-            btn.textContent = '立即秒杀';
+                log('请求已入队(' + data.data + ')，轮询结果中...');
+                pollResult(goodsId, btn, 0);
+            } else {
+                log('秒杀失败: ' + data.message);
+                btn.disabled = false;
+                btn.textContent = '立即秒杀';
+            }
         }).catch(function (e) {
             log('请求失败: ' + e.message);
             btn.disabled = false;
             btn.textContent = '立即秒杀';
         });
+    }
+
+    // v3: 轮询秒杀结果 (0=排队中, -1=没抢到, >0=订单ID)
+    function pollResult(goodsId, btn, count) {
+        if (count > 10) {
+            log('轮询超时，请点"查询秒杀结果"手动确认');
+            btn.disabled = false;
+            btn.textContent = '立即秒杀';
+            return;
+        }
+        setTimeout(function () {
+            fetch(BASE + '/seckill/result?goodsId=' + goodsId, {
+                headers: {'Authorization': 'Bearer ' + token}
+            }).then(function (res) { return res.json(); }).then(function (data) {
+                if (data.data === 0) {
+                    log('排队中... (' + (count + 1) + ')');
+                    pollResult(goodsId, btn, count + 1);
+                } else if (data.data === -1) {
+                    log('未抢到');
+                    btn.disabled = false;
+                    btn.textContent = '立即秒杀';
+                } else {
+                    log('秒杀成功！订单ID=' + data.data);
+                    document.getElementById('resultBox').textContent = '已抢到，订单ID=' + data.data;
+                    btn.disabled = false;
+                    btn.textContent = '立即秒杀';
+                    loadGoods();
+                }
+            });
+        }, 300);
     }
 
     function queryResult() {

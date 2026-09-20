@@ -6,8 +6,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.amqp.RabbitAutoConfiguration;
 
-// v2: Redis已启用; RabbitMQ(v3)/Redisson(v3)暂未安装, 继续排除自动装配
-@SpringBootApplication(exclude = {RabbitAutoConfiguration.class, RedissonAutoConfiguration.class})
+// v3: Redis/RabbitMQ已启用; Redisson(后续限流用)暂未使用, 继续排除
+@SpringBootApplication(exclude = {RedissonAutoConfiguration.class})
 @MapperScan("com.example.seckill.mapper")
 public class SeckillApplication {
 
