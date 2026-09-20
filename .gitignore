@@ -1,0 +1,37 @@
+# Maven构建产物
+target/
+*.class
+
+# 日志文件
+*.log
+build.log
+build2.log
+app.log
+
+# 本地测试脚本产物
+token.json
+login_response.txt
+
+# Maven Wrapper下载的发行版
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# IDE配置
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.eclipse
+.settings/
+.classpath
+.project
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# JDK/临时下载
+*.zip
+*.exe
+*.msi

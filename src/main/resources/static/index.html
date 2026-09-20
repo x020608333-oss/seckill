@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>秒杀系统 - 测试控制台</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: "Microsoft YaHei", sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { text-align: center; color: #e4393c; margin-bottom: 20px; }
+        .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+        .card h2 { font-size: 16px; margin-bottom: 12px; color: #333; border-left: 4px solid #e4393c; padding-left: 8px; }
+        input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        button { background: #e4393c; color: #fff; border: none; padding: 10px 24px; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #c62e31; }
+        button.secondary { background: #1890ff; }
+        button.secondary:hover { background: #0c7cd5; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .goods { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #eee; }
+        .goods:last-child { border-bottom: none; }
+        .goods .info .name { font-weight: bold; font-size: 15px; }
+        .goods .info .price { color: #e4393c; font-size: 18px; font-weight: bold; }
+        .goods .info .price s { color: #999; font-size: 13px; font-weight: normal; margin-left: 8px; }
+        .goods .info .stock { color: #666; font-size: 13px; }
+        #log { background: #1e1e1e; color: #0f0; border-radius: 8px; padding: 16px; height: 220px; overflow-y: auto; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; }
+        .token-box { word-break: break-all; background: #f0f7ff; padding: 8px; border-radius: 4px; font-size: 12px; color: #1890ff; margin-top: 8px; display: none; }
+        .user-bar { text-align: right; color: #666; font-size: 13px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>秒杀系统测试控制台</h1>
+    <div class="user-bar" id="userBar">未登录</div>
+    <div class="card">
+        <h2>1. 用户登录</h2>
+        <input id="username" placeholder="用户名（默认 admin）" value="admin">
+        <input id="password" type="password" placeholder="密码（默认 123456）" value="123456">
+        <button onclick="login()">登录</button>
+        <div class="token-box" id="tokenBox"></div>
+    </div>
+    <div class="card">
+        <h2>2. 秒杀商品列表</h2>
+        <button class="secondary" onclick="loadGoods()">刷新商品列表</button>
+        <div id="goodsList" style="margin-top:10px;color:#999;">请先登录，然后点击刷新</div>
+    </div>
+    <div class="card">
+        <h2>3. 我的秒杀结果</h2>
+        <button class="secondary" onclick="queryResult()">查询 goodsId=1 的秒杀结果</button>
+        <div id="resultBox" style="margin-top:10px;color:#999;"></div>
+    </div>
+    <div class="card">
+        <h2>请求日志</h2>
+        <div id="log">等待操作...\n</div>
+    </div>
+</div>
+<script>
+    var BASE = 'http://localhost:8080';
+    var token = localStorage.getItem('seckill_token') || '';
+
+    function log(msg) {
+        var el = document.getElementById('log');
+        el.textContent += new Date().toLocaleTimeString() + ' ' + msg + '\n';
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function updateUserBar() {
+        document.getElementById('userBar').textContent = token ? '已登录' : '未登录';
+        if (token) {
+            var box = document.getElementById('tokenBox');
+            box.style.display = 'block';
+            box.textContent = 'Token: ' + token.substring(0, 60) + '...';
+        }
+    }
+
+    function login() {
+        var username = document.getElementById('username').value;
+        var password = document.getElementById('password').value;
+        log('-> POST /user/login 用户名=' + username);
+        fetch(BASE + '/user/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({username: username, password: password})
+        }).then(function (res) { return res.json(); }).then(function (data) {
+            log('<- ' + JSON.stringify(data).substring(0, 120) + '...');
+            if (data.code === 200) {
+                token = data.data;
+                localStorage.setItem('seckill_token', token);
+                updateUserBar();
+                log('登录成功！');
+                loadGoods();
+            } else {
+                log('登录失败: ' + data.message);
+            }
+        }).catch(function (e) { log('请求失败: ' + e.message); });
+    }
+
+    function loadGoods() {
+        if (!token) { log('请先登录'); return; }
+        log('-> GET /goods/list');
+        fetch(BASE + '/goods/list', {
+            headers: {'Authorization': 'Bearer ' + token}
+        }).then(function (res) { return res.json(); }).then(function (data) {
+            log('<- code=' + data.code);
+            if (data.code === 200) {
+                var box = document.getElementById('goodsList');
+                box.innerHTML = '';
+                data.data.forEach(function (g) {
+                    var div = document.createElement('div');
+                    div.className = 'goods';
+                    div.innerHTML =
+                        '<div class="info">' +
+                            '<div class="name">' + g.goodsName + '</div>' +
+                            '<div class="price">¥' + g.seckillPrice + '<s>¥' + g.goodsPrice + '</s></div>' +
+                            '<div class="stock">秒杀库存：' + g.stockCount + '</div>' +
+                        '</div>' +
+                        '<button onclick="doSeckill(' + g.id + ', this)">立即秒杀</button>';
+                    box.appendChild(div);
+                });
+            } else { log('失败: ' + data.message); }
+        }).catch(function (e) { log('请求失败: ' + e.message); });
+    }
+
+    function doSeckill(goodsId, btn) {
+        if (!token) { log('请先登录'); return; }
+        btn.disabled = true;
+        btn.textContent = '抢购中...';
+        log('-> POST /seckill/doSeckill?goodsId=' + goodsId);
+        fetch(BASE + '/seckill/doSeckill?goodsId=' + goodsId, {
+            method: 'POST',
+            headers: {'Authorization': 'Bearer ' + token}
+        }).then(function (res) { return res.json(); }).then(function (data) {
+            log('<- ' + JSON.stringify(data));
+            if (data.code === 200) {
+                log('秒杀成功！订单ID=' + data.data.id);
+                loadGoods();
+            } else { log('秒杀失败: ' + data.message); }
+            btn.disabled = false;
+            btn.textContent = '立即秒杀';
+        }).catch(function (e) {
+            log('请求失败: ' + e.message);
+            btn.disabled = false;
+            btn.textContent = '立即秒杀';
+        });
+    }
+
+    function queryResult() {
+        if (!token) { log('请先登录'); return; }
+        log('-> GET /seckill/result?goodsId=1');
+        fetch(BASE + '/seckill/result?goodsId=1', {
+            headers: {'Authorization': 'Bearer ' + token}
+        }).then(function (res) { return res.json(); }).then(function (data) {
+            log('<- ' + JSON.stringify(data));
+            document.getElementById('resultBox').textContent =
+                data.code === 200 ? (data.data === -1 ? '未抢到' : '已抢到，订单ID=' + data.data) : data.message;
+        }).catch(function (e) { log('请求失败: ' + e.message); });
+    }
+
+    updateUserBar();
+    if (token) { loadGoods(); }
+</script>
+</body>
+</html>

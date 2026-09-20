@@ -1,0 +1,56 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: seckill
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/seckill?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:123456}
+  # Redis: 第一周可先用默认配置; 未安装Redis时下面MQ/Redis相关代码先注释
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 5000
+    lettuce:
+      pool:
+        max-active: 100
+        max-idle: 20
+        min-idle: 5
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 1
+  mvc:
+    pathmatch:
+      matching-strategy: path_pattern_parser
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+
+logging:
+  level:
+    com.example.seckill: debug
+
+# JWT配置(生产环境请通过环境变量 JWT_SECRET 覆盖)
+jwt:
+  secret: ${JWT_SECRET:change-me-to-a-random-secret-key-in-production}
+  # token有效期: 7天(毫秒)
+  expire: 604800000
+
+# Knife4j 配置
+knife4j:
+  enable: true
+  setting:
+    language: zh-CN
