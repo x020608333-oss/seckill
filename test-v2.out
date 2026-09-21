@@ -1,0 +1,41 @@
+Token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIiwidXN...
+
+===== 1. 秒杀(应返回排队中) =====
+{
+    "code":  200,
+    "message":  "success",
+    "data":  "???��????-"
+}
+
+===== 2. 立即查结�?应为0=排队�? =====
+{
+    "code":  200,
+    "message":  "success",
+    "data":  0
+}
+
+===== 3. �?秒后再查(应为订单ID) =====
+{
+    "code":  200,
+    "message":  "success",
+    "data":  8
+}
+
+===== 4. 重复秒杀(应被拦截) =====
+{
+    "code":  500,
+    "message":  "?��??oo��??����-??????, ������???��???��??��????",
+    "data":  null
+}
+
+===== 5. 数据验证 =====
+Redis库存(应为99):
+99
+Redis订单Key(应为订单ID):
+8
+DB验证(库存99 + 秒杀订单1�?:
+stock_count
+99
+id	order_id
+8	8
+5	5
