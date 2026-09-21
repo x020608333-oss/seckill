@@ -1,8 +1,8 @@
 package com.example.seckill.controller;
 
+import com.example.seckill.annotation.RateLimit;
 import com.example.seckill.common.Result;
 import com.example.seckill.config.UserContext;
-import com.example.seckill.entity.OrderInfo;
 import com.example.seckill.entity.User;
 import com.example.seckill.service.SeckillService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +25,9 @@ public class SeckillController {
     /**
      * 秒杀下单
      * v3: Redis预减库存 + MQ异步建单, 立即返回"排队中"
+     * v4: 加单用户限流(每秒最多5次), 防脚本刷接口
      */
+    @RateLimit(count = 5, period = 1)
     @PostMapping("/doSeckill")
     public Result<String> doSeckill(@RequestParam Long goodsId) {
         User user = UserContext.getUser();

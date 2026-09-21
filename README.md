@@ -15,14 +15,52 @@ Spring Boot 2.7 / MyBatis-Plus / MySQL 8 / JWT / Lombok / Hutool
 | v1 | 纯数据库秒杀: 乐观锁防超卖 + 唯一索引防重复 + 事务 | ✅ 已完成 |
 | v2 | Redis: 库存预热 + Lua原子扣减 + 内存售罄标记 + 商品缓存三连防护 | ✅ 已完成 |
 | v3 | RabbitMQ异步下单削峰 + 手动ACK + 失败补偿 + 结果轮询 | ✅ 已完成 |
-| v4 | Redisson分布式锁限流 + JMeter压测报告 + Docker Compose部署 | ⬜ 计划中 |
+| v4 | Redisson分布式锁 + RRateLimiter接口限流 + 压测工具 + Docker Compose | ✅ 已完成 |
 
-## 秒杀核心链路(v3)
+## 压测报告(v4, 单机实测)
+
+压测工具: 内置 JUnit 压测类 `LoadTest` (200 线程并发, CountDownLatch 同步起跑), 等价于 JMeter 的轻量实现
+
+| 指标 | 结果 |
+|------|------|
+| 并发线程 | 200 (同时起跑) |
+| 总耗时 | 975 ms |
+| 端到端 QPS | ~205 |
+| 成功入队 | 100 |
+| 售罄失败 | 100 |
+| 其他异常 | 0 |
+| DB 剩余库存 | 0 (**无超卖**) |
+| DB 订单数 | 100 (**与库存扣减完全一致**) |
+
+运行压测:
+
+```bash
+# 1. 启动项目(先启动 MySQL / Redis / RabbitMQ)
+# 2. 执行
+.\mvnw.cmd test -Dtest=LoadTest
+```
+
+## 一键部署(Docker Compose)
+
+```bash
+docker compose up -d
+# 访问 http://localhost:8080/
+# RabbitMQ 管理台 http://localhost:15672 (guest/guest)
+```
+
+包含服务: MySQL 8(自动初始化建表) + Redis 7(AOF持久化) + RabbitMQ 3.13 + 应用,
+应用等中间件健康检查通过后才会启动。
+
+## 秒杀核心链路(v4 完整版)
 
 ```
 用户请求
    ↓
 [拦截器] JWT鉴权
+   ↓
+[Redisson限流] 单用户每秒最多5次(防脚本刷单)
+   ↓
+[Redisson分布式锁] 同一用户并发请求串行化(防重复提交)
    ↓
 [内存] 售罄标记      → 已售罄? 直接失败(0 IO)
    ↓
@@ -49,6 +87,14 @@ Spring Boot 2.7 / MyBatis-Plus / MySQL 8 / JWT / Lombok / Hutool
 - **最终一致**: 建单失败时回滚Redis库存(`compensateRedis`)，保证Redis与DB库存一致
 - **幂等**: DB `(user_id, goods_id)` 唯一索引兜底，消息重复投递也不会重复建单
 - **手动ACK**: 业务成功才ack，系统异常nack重回队列，避免消息丢失
+- **分布式锁**: Redisson 保证同用户并发请求串行执行，watchdog自动续期防锁提前释放
+- **限流**: Redisson RRateLimiter 基于令牌桶，天然支持分布式限流(对比Guava只能单机)
+
+### 缓存三连问防护(GoodsService)
+
+- **缓存穿透** → 缓存空值(短TTL 60秒), 防恶意刷不存在的商品ID
+- **缓存击穿** → 秒杀商品详情几乎不变, 采用长TTL + 手动失效(管理端变更时调 `evictGoodsCache`)
+- **缓存雪崩** → 随机TTL(1小时 + 0~10分钟), 避免大量key同一时刻过期
 
 ## 快速开始
 

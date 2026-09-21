@@ -13,6 +13,8 @@ import com.example.seckill.mapper.SeckillOrderMapper;
 import com.example.seckill.vo.GoodsVo;
 import com.example.seckill.vo.SeckillMessage;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +30,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 秒杀核心服务
@@ -58,6 +61,12 @@ public class SeckillService implements InitializingBean {
      */
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+
+    /**
+     * v4: 分布式锁, 保证"同一用户+同一商品"的并发请求串行执行
+     */
+    @Autowired
+    private RedissonClient redissonClient;
 
     @Autowired
     private DefaultRedisScript<Long> stockDeductScript;
@@ -119,35 +128,57 @@ public class SeckillService implements InitializingBean {
             throw new BusinessException("手慢了, 商品已抢完");
         }
 
-        String orderKey = RedisKeys.seckillOrder(user.getId(), goodsId);
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(orderKey))) {
-            throw new BusinessException("每人限购一件, 请勿重复秒杀");
-        }
-
-        Long deductResult = stringRedisTemplate.execute(
-                stockDeductScript,
-                Collections.singletonList(RedisKeys.seckillStock(goodsId)),
-                "1");
-        if (deductResult == null || deductResult == 0) {
-            emptyStockMap.put(goodsId, true);
-            stringRedisTemplate.opsForValue().set(RedisKeys.seckillEmpty(goodsId), "1");
-            throw new BusinessException("手慢了, 商品已抢完");
-        }
-
-        // 占位订单Key("1"=排队中), 防并发重复
-        stringRedisTemplate.opsForValue().set(orderKey, "1");
+        // v4: 分布式锁 — 同一用户对同一商品的并发重复请求串行化
+        // tryLock(0, 3s): 不等待(等待0ms), 拿不到锁说明有并发请求正在处理, 直接拒绝
+        // 锁内只做"判重 + 扣库存 + 发消息", 耗时短; 看门狗(watchdog)自动续期防提前释放
+        RLock lock = redissonClient.getLock("lock:seckill:" + user.getId() + ":" + goodsId);
+        boolean locked;
         try {
-            rabbitTemplate.convertAndSend(
-                    MqConfig.SECKILL_EXCHANGE,
-                    MqConfig.SECKILL_ROUTING_KEY,
-                    new SeckillMessage(user.getId(), goodsId));
-            log.info("秒杀请求已入队: userId={}, goodsId={}", user.getId(), goodsId);
-        } catch (Exception e) {
-            // 发消息失败: 回滚Redis库存和占位Key
-            stringRedisTemplate.opsForValue().increment(RedisKeys.seckillStock(goodsId), 1);
-            stringRedisTemplate.delete(orderKey);
-            log.error("发送MQ消息失败", e);
+            locked = lock.tryLock(0, 3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             throw new BusinessException("系统繁忙, 请稍后重试");
+        }
+        if (!locked) {
+            throw new BusinessException("您有请求正在处理中, 请勿重复提交");
+        }
+
+        try {
+            String orderKey = RedisKeys.seckillOrder(user.getId(), goodsId);
+            if (Boolean.TRUE.equals(stringRedisTemplate.hasKey(orderKey))) {
+                throw new BusinessException("每人限购一件, 请勿重复秒杀");
+            }
+
+            Long deductResult = stringRedisTemplate.execute(
+                    stockDeductScript,
+                    Collections.singletonList(RedisKeys.seckillStock(goodsId)),
+                    "1");
+            if (deductResult == null || deductResult == 0) {
+                emptyStockMap.put(goodsId, true);
+                stringRedisTemplate.opsForValue().set(RedisKeys.seckillEmpty(goodsId), "1");
+                throw new BusinessException("手慢了, 商品已抢完");
+            }
+
+            // 占位订单Key("1"=排队中), 防并发重复
+            stringRedisTemplate.opsForValue().set(orderKey, "1");
+            try {
+                rabbitTemplate.convertAndSend(
+                        MqConfig.SECKILL_EXCHANGE,
+                        MqConfig.SECKILL_ROUTING_KEY,
+                        new SeckillMessage(user.getId(), goodsId));
+                log.info("秒杀请求已入队: userId={}, goodsId={}", user.getId(), goodsId);
+            } catch (Exception e) {
+                // 发消息失败: 回滚Redis库存和占位Key
+                stringRedisTemplate.opsForValue().increment(RedisKeys.seckillStock(goodsId), 1);
+                stringRedisTemplate.delete(orderKey);
+                log.error("发送MQ消息失败", e);
+                throw new BusinessException("系统繁忙, 请稍后重试");
+            }
+        } finally {
+            // 只释放当前线程持有的锁(避免释放别人的锁)
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
         }
     }
 
